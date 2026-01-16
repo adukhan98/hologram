@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cyberpunk Particle System</title>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            overflow: hidden;
+            background: #0a0a0f;
+            font-family: 'Orbitron', monospace;
+        }
+
+        #canvas-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 1;
+        }
+
+        /* Cyberpunk Background Effects */
+        .bg-grid {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image:
+                linear-gradient(rgba(0, 255, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 255, 255, 0.03) 1px, transparent 1px);
+            background-size: 50px 50px;
+            animation: gridMove 20s linear infinite;
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        @keyframes gridMove {
+            0% {
+                transform: translate(0, 0);
+            }
+
+            100% {
+                transform: translate(50px, 50px);
+            }
+        }
+
+        .scanlines {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: repeating-linear-gradient(0deg,
+                    rgba(0, 0, 0, 0.1) 0px,
+                    rgba(0, 0, 0, 0.1) 1px,
+                    transparent 1px,
+                    transparent 3px);
+            z-index: 2;
+            pointer-events: none;
+            opacity: 0.5;
+        }
+
+        .vignette {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(ellipse at center, transparent 40%, rgba(0, 0, 0, 0.8) 100%);
+            z-index: 3;
+            pointer-events: none;
+        }
+
+        /* HUD Elements */
+        .hud {
+            position: fixed;
+            font-size: 12px;
+            color: #00FFFF;
+            text-shadow: 0 0 10px #00FFFF, 0 0 20px #00FFFF;
+            z-index: 100;
+            pointer-events: none;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        .hud-tl {
+            top: 20px;
+            left: 20px;
+        }
+
+        .hud-tr {
+            top: 20px;
+            right: 20px;
+            text-align: right;
+        }
+
+        .hud-bl {
+            bottom: 20px;
+            left: 20px;
+        }
+
+        .hud-br {
+            bottom: 20px;
+            right: 20px;
+            text-align: right;
+        }
+
+        .hud-label {
+            font-size: 10px;
+            opacity: 0.6;
+            margin-bottom: 2px;
+        }
+
+        .hud-value {
+            font-size: 14px;
+            font-weight: 700;
+        }
+
+        /* Video Feed - Fullscreen Background */
+        #video {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            object-fit: cover;
+            transform: scaleX(-1);
+            z-index: 0;
+        }
+
+        /* Dark overlay on video */
+        .video-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        /* Loading State */
+        .loading {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #00FFFF;
+            font-size: 18px;
+            z-index: 200;
+            text-shadow: 0 0 20px #00FFFF;
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.5;
+            }
+        }
+
+        .loading.hidden {
+            display: none;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="bg-grid"></div>
+    <div class="scanlines"></div>
+    <div class="vignette"></div>
+
+    <div id="canvas-container"></div>
+
+    <div class="hud hud-tl">
+        <div class="hud-label">FPS</div>
+        <div class="hud-value" id="fps">0</div>
+    </div>
+
+    <div class="hud hud-tr">
+        <div class="hud-label">Particles</div>
+        <div class="hud-value" id="particle-count">12000</div>
+    </div>
+
+    <div class="hud hud-bl">
+        <div class="hud-label">Left Hand</div>
+        <div class="hud-value" id="left-hand-state">WAITING</div>
+    </div>
+
+    <div class="hud hud-br">
+        <div class="hud-label">Right Hand</div>
+        <div class="hud-value" id="right-hand-state">WAITING</div>
+    </div>
+
+    <video id="video" autoplay playsinline></video>
+    <div class="video-overlay"></div>
+
+    <div class="loading" id="loading">INITIALIZING NEURAL INTERFACE...</div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+        }
+    }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        // ==================== CONFIGURATION ====================
+        const CONFIG = {
+            particleCount: 12000,
+            particleSize: 2.4,
+            lerpSpeed: 0.16,
+            repulsionRadius: 120,
+            repulsionStrength: 80,
+            nebulaSpread: 1.5,
+            rippleStrength: 30,
+            basketballRadius: 100
+        };
+
+        // ==================== STATE ====================
+        const state = {
+            leftHand: null,
+            rightHand: null,
+            leftFingers: 0,
+            rightFingers: 0,
+            leftPalmCenter: null,
+            rightIndexTip: null,
+            currentText: '',
+            currentColor: 0x00FFFF,
+            nebulaMode: false,
+            catchMode: false,
+            ultimateMode: false,
+            textTargets: [],
+            basketballTargets: [],
+            fps: 0
+        };
+
+        // ==================== DOM ELEMENTS ====================
+        const container = document.getElementById('canvas-container');
+        const video = document.getElementById('video');
+        const loadingEl = document.getElementById('loading');
+        const fpsEl = document.getElementById('fps');
+        const leftHandEl = document.getElementById('left-hand-state');
+        const rightHandEl = document.getElementById('right-hand-state');
+
+        // ==================== THREE.JS SETUP ====================
+        const scene = new THREE.Scene();
+
+        const aspect = window.innerWidth / window.innerHeight;
+        const frustumSize = 600;
+        const camera = new THREE.OrthographicCamera(
+            -frustumSize * aspect / 2,
+            frustumSize * aspect / 2,
+            frustumSize / 2,
+            -frustumSize / 2,
+            0.1,
+            1000
+        );
+        camera.position.z = 500;
+
+        const renderer = new THREE.WebGLRenderer({
+            antialias: true,
+            alpha: true
+        });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        container.appendChild(renderer.domElement);
+
+        // ==================== PARTICLE SYSTEM ====================
+        const geometry = new THREE.BufferGeometry();
+        const positions = new Float32Array(CONFIG.particleCount * 3);
+        const colors = new Float32Array(CONFIG.particleCount * 3);
+        const originalPositions = new Float32Array(CONFIG.particleCount * 3);
+        const targetPositions = new Float32Array(CONFIG.particleCount * 3);
+        const velocities = new Float32Array(CONFIG.particleCount * 3);
+
+        // Initialize particles randomly
+        for (let i = 0; i < CONFIG.particleCount; i++) {
+            const i3 = i * 3;
+            const x = (Math.random() - 0.5) * window.innerWidth;
+            const y = (Math.random() - 0.5) * window.innerHeight;
+            positions[i3] = x;
+            positions[i3 + 1] = y;
+            positions[i3 + 2] = 0;
+            originalPositions[i3] = x;
+            originalPositions[i3 + 1] = y;
+            originalPositions[i3 + 2] = 0;
+            targetPositions[i3] = x;
+            targetPositions[i3 + 1] = y;
+            targetPositions[i3 + 2] = 0;
+            velocities[i3] = 0;
+            velocities[i3 + 1] = 0;
+            velocities[i3 + 2] = 0;
+
+            // Initial neon cyan color
+            colors[i3] = 0;
+            colors[i3 + 1] = 1;
+            colors[i3 + 2] = 1;
+        }
+
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+        const material = new THREE.PointsMaterial({
+            size: CONFIG.particleSize,
+            vertexColors: true,
+            blending: THREE.AdditiveBlending,
+            transparent: true,
+            opacity: 0.9,
+            sizeAttenuation: false
+        });
+
+        const particles = new THREE.Points(geometry, material);
+        scene.add(particles);
+
+        // ==================== TEXT TO PARTICLES ====================
+        const textCanvas = document.createElement('canvas');
+        textCanvas.width = 800;
+        textCanvas.height = 200;
+        const textCtx = textCanvas.getContext('2d');
+
+        function generateTextTargets(text) {
+            textCtx.clearRect(0, 0, textCanvas.width, textCanvas.height);
+            textCtx.fillStyle = '#FFFFFF';
+            textCtx.font = 'bold 75px Arial, sans-serif';
+            textCtx.textAlign = 'center';
+            textCtx.textBaseline = 'middle';
+            textCtx.fillText(text, textCanvas.width / 2, textCanvas.height / 2);
+
+            const imageData = textCtx.getImageData(0, 0, textCanvas.width, textCanvas.height);
+            const pixels = imageData.data;
+            const targets = [];
+
+            const step = 3; // Sample every 3rd pixel for performance
+            for (let y = 0; y < textCanvas.height; y += step) {
+                for (let x = 0; x < textCanvas.width; x += step) {
+                    const i = (y * textCanvas.width + x) * 4;
+                    if (pixels[i + 3] > 128) {
+                        targets.push({
+                            x: (x - textCanvas.width / 2) * 1.2,
+                            y: -(y - textCanvas.height / 2) * 1.2
+                        });
+                    }
+                }
+            }
+            return targets;
+        }
+
+        // ==================== BASKETBALL GENERATION ====================
+        function generateBasketballTargets(radius, count) {
+            const targets = [];
+            const phi = Math.PI * (3 - Math.sqrt(5)); // Golden angle
+
+            for (let i = 0; i < count; i++) {
+                const y = 1 - (i / (count - 1)) * 2;
+                const radiusAtY = Math.sqrt(1 - y * y);
+                const theta = phi * i;
+
+                const x = Math.cos(theta) * radiusAtY;
+                const z = Math.sin(theta) * radiusAtY;
+
+                // Determine if this point is on a seam
+                const isSeam = isOnBasketballSeam(x, y, z);
+
+                targets.push({
+                    x: x * radius,
+                    y: y * radius,
+                    z: z * radius,
+                    isSeam
+                });
+            }
+            return targets;
+        }
+
+        function isOnBasketballSeam(x, y, z) {
+            const seamWidth = 0.08;
+            // Horizontal seam
+            if (Math.abs(y) < seamWidth) return true;
+            // Vertical seam
+            if (Math.abs(x) < seamWidth && z > -0.2) return true;
+            // Curved seams
+            const angle = Math.atan2(z, x);
+            const curve1 = Math.sin(angle * 2 + Math.PI / 4) * 0.5;
+            if (Math.abs(y - curve1) < seamWidth) return true;
+            return false;
+        }
+
+        // ==================== FINGER COUNTING ====================
+        function countExtendedFingers(landmarks) {
+            if (!landmarks || landmarks.length < 21) return 0;
+
+            const fingerTips = [8, 12, 16, 20]; // Index, Middle, Ring, Pinky tips
+            const fingerPips = [6, 10, 14, 18]; // PIP joints
+            let count = 0;
+
+            // Thumb - compare x position (for right hand) or use different logic
+            const thumbTip = landmarks[4];
+            const thumbIp = landmarks[3];
+            const thumbMcp = landmarks[2];
+
+            // Check if thumb is extended based on distance from palm
+            const thumbExtended = Math.hypot(
+                thumbTip.x - landmarks[0].x,
+                thumbTip.y - landmarks[0].y
+            ) > Math.hypot(
+                thumbMcp.x - landmarks[0].x,
+                thumbMcp.y - landmarks[0].y
+            ) * 1.2;
+
+            if (thumbExtended) count++;
+
+            // Other fingers - check if tip is above PIP joint (extended)
+            for (let i = 0; i < fingerTips.length; i++) {
+                const tip = landmarks[fingerTips[i]];
+                const pip = landmarks[fingerPips[i]];
+                const mcp = landmarks[fingerPips[i] - 2];
+
+                // Finger is extended if tip is farther from wrist than PIP
+                const tipDist = Math.hypot(tip.x - landmarks[0].x, tip.y - landmarks[0].y);
+                const pipDist = Math.hypot(pip.x - landmarks[0].x, pip.y - landmarks[0].y);
+
+                if (tipDist > pipDist * 1.1) count++;
+            }
+
+            return count;
+        }
+
+        function getPalmCenter(landmarks) {
+            if (!landmarks) return null;
+            const palmLandmarks = [0, 5, 9, 13, 17];
+            let x = 0, y = 0;
+            for (const idx of palmLandmarks) {
+                x += landmarks[idx].x;
+                y += landmarks[idx].y;
+            }
+            return {
+                x: x / palmLandmarks.length,
+                y: y / palmLandmarks.length
+            };
+        }
+
+        function landmarkToScreen(landmark) {
+            // MediaPipe coordinates are 0-1, need to map to screen space
+            // Video is mirrored, so we flip x
+            return {
+                x: (1 - landmark.x - 0.5) * window.innerWidth,
+                y: -(landmark.y - 0.5) * window.innerHeight
+            };
+        }
+
+        // ==================== MEDIAPIPE SETUP ====================
+        async function initMediaPipe() {
+            // Use globally loaded MediaPipe from script tags
+            const hands = new window.Hands({
+                locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+            });
+
+            hands.setOptions({
+                maxNumHands: 2,
+                modelComplexity: 1,
+                minDetectionConfidence: 0.7,
+                minTrackingConfidence: 0.5
+            });
+
+            hands.onResults(onHandResults);
+
+            const camera = new window.Camera(video, {
+                onFrame: async () => {
+                    await hands.send({ image: video });
+                },
+                width: 640,
+                height: 480
+            });
+
+            await camera.start();
+            loadingEl.classList.add('hidden');
+        }
+
+        function onHandResults(results) {
+            state.leftHand = null;
+            state.rightHand = null;
+            state.leftFingers = 0;
+            state.rightFingers = 0;
+
+            if (results.multiHandLandmarks && results.multiHandedness) {
+                for (let i = 0; i < results.multiHandLandmarks.length; i++) {
+                    const landmarks = results.multiHandLandmarks[i];
+                    const handedness = results.multiHandedness[i].label;
+                    const fingers = countExtendedFingers(landmarks);
+                    const palmCenter = getPalmCenter(landmarks);
+
+                    // MediaPipe reports handedness as if looking at a mirror
+                    // So "Right" from MediaPipe is actually the viewer's left hand
+                    if (handedness === 'Right') {
+                        state.leftHand = landmarks;
+                        state.leftFingers = fingers;
+                        state.leftPalmCenter = palmCenter ? landmarkToScreen(palmCenter) : null;
+                    } else {
+                        state.rightHand = landmarks;
+                        state.rightFingers = fingers;
+                        state.rightIndexTip = landmarkToScreen(landmarks[8]);
+                    }
+                }
+            }
+
+            updateHandStates();
+        }
+
+        function updateHandStates() {
+            // Left hand controls text/mode
+            state.catchMode = state.leftFingers === 5;
+
+            if (!state.catchMode && state.leftHand) {
+                const textMap = {
+                    1: { text: 'Hello', color: 0x00FFFF },
+                    2: { text: 'This', color: 0xFFFF00 },
+                    3: { text: 'Is', color: 0xFF00FF },
+                    4: { text: 'Magic', color: 0x00FF88 }
+                };
+
+                const config = textMap[state.leftFingers];
+                if (config && config.text !== state.currentText) {
+                    state.currentText = config.text;
+                    state.currentColor = config.color;
+                    state.textTargets = generateTextTargets(config.text);
+                    updateParticleTargets();
+                }
+            }
+
+            // Right hand controls interaction mode
+            state.nebulaMode = state.rightFingers === 5;
+
+            // Ultimate mode: both hands open
+            state.ultimateMode = state.catchMode && state.nebulaMode;
+
+            if (state.ultimateMode && state.basketballTargets.length === 0) {
+                state.basketballTargets = generateBasketballTargets(CONFIG.basketballRadius, CONFIG.particleCount);
+            }
+
+            // Update HUD
+            if (state.leftHand) {
+                if (state.catchMode) {
+                    leftHandEl.textContent = 'CATCH MODE';
+                    leftHandEl.style.color = '#FF6600';
+                } else {
+                    leftHandEl.textContent = `${state.leftFingers} FINGER${state.leftFingers !== 1 ? 'S' : ''}: ${state.currentText || 'READY'}`;
+                    leftHandEl.style.color = '#00FFFF';
+                }
+            } else {
+                leftHandEl.textContent = 'WAITING';
+                leftHandEl.style.color = '#00FFFF';
+            }
+
+            if (state.rightHand) {
+                if (state.nebulaMode) {
+                    rightHandEl.textContent = 'NEBULA MODE';
+                    rightHandEl.style.color = '#FF00FF';
+                } else {
+                    rightHandEl.textContent = 'TRACKING';
+                    rightHandEl.style.color = '#00FFFF';
+                }
+            } else {
+                rightHandEl.textContent = 'WAITING';
+                rightHandEl.style.color = '#00FFFF';
+            }
+
+            if (state.ultimateMode) {
+                leftHandEl.textContent = 'ULTIMATE MODE';
+                rightHandEl.textContent = 'ULTIMATE MODE';
+                leftHandEl.style.color = '#FF6600';
+                rightHandEl.style.color = '#FF6600';
+            }
+        }
+
+        function updateParticleTargets() {
+            const targets = state.textTargets;
+            if (targets.length === 0) return;
+
+            const positions = geometry.attributes.position.array;
+            const colorsArr = geometry.attributes.color.array;
+
+            // Convert hex color to RGB
+            const r = ((state.currentColor >> 16) & 255) / 255;
+            const g = ((state.currentColor >> 8) & 255) / 255;
+            const b = (state.currentColor & 255) / 255;
+
+            for (let i = 0; i < CONFIG.particleCount; i++) {
+                const i3 = i * 3;
+                const target = targets[i % targets.length];
+                targetPositions[i3] = target.x;
+                targetPositions[i3 + 1] = target.y;
+                targetPositions[i3 + 2] = 0;
+
+                colorsArr[i3] = r;
+                colorsArr[i3 + 1] = g;
+                colorsArr[i3 + 2] = b;
+            }
+
+            geometry.attributes.color.needsUpdate = true;
+        }
+
+        // ==================== ANIMATION LOOP ====================
+        let lastTime = performance.now();
+        let frameCount = 0;
+        let lastFpsUpdate = 0;
+        let basketballRotation = 0;
+
+        function animate(currentTime) {
+            requestAnimationFrame(animate);
+
+            // FPS calculation
+            frameCount++;
+            if (currentTime - lastFpsUpdate >= 1000) {
+                state.fps = frameCount;
+                fpsEl.textContent = state.fps;
+                frameCount = 0;
+                lastFpsUpdate = currentTime;
+            }
+
+            const deltaTime = (currentTime - lastTime) / 1000;
+            lastTime = currentTime;
+
+            const positions = geometry.attributes.position.array;
+            const colorsArr = geometry.attributes.color.array;
+
+            // Ultimate Mode: Basketball formation
+            if (state.ultimateMode && state.leftPalmCenter) {
+                basketballRotation += deltaTime * 2;
+
+                for (let i = 0; i < CONFIG.particleCount; i++) {
+                    const i3 = i * 3;
+                    const target = state.basketballTargets[i % state.basketballTargets.length];
+
+                    // Rotate around Y axis
+                    const cos = Math.cos(basketballRotation);
+                    const sin = Math.sin(basketballRotation);
+                    const rotX = target.x * cos - target.z * sin;
+                    const rotZ = target.x * sin + target.z * cos;
+
+                    // Target position relative to left palm
+                    const tx = state.leftPalmCenter.x + rotX;
+                    const ty = state.leftPalmCenter.y + target.y;
+
+                    // Bouncy motion
+                    const bounce = Math.abs(Math.sin(currentTime * 0.01 + i * 0.1)) * 20;
+                    const jumpOffset = Math.sin(currentTime * 0.008 + i * 0.05) * 15;
+
+                    // Move towards target with bounce
+                    positions[i3] += (tx - positions[i3]) * CONFIG.lerpSpeed * 0.8;
+                    positions[i3 + 1] += (ty + bounce + jumpOffset - positions[i3 + 1]) * CONFIG.lerpSpeed * 0.8;
+                    positions[i3 + 2] = 0;
+
+                    // Color: orange for ball, black for seams
+                    if (target.isSeam) {
+                        colorsArr[i3] = 0.1;
+                        colorsArr[i3 + 1] = 0.1;
+                        colorsArr[i3 + 2] = 0.1;
+                    } else {
+                        colorsArr[i3] = 1;
+                        colorsArr[i3 + 1] = 0.4;
+                        colorsArr[i3 + 2] = 0;
+                    }
+                }
+                geometry.attributes.color.needsUpdate = true;
+            }
+            // Nebula Mode: Scatter with ripples
+            else if (state.nebulaMode) {
+                for (let i = 0; i < CONFIG.particleCount; i++) {
+                    const i3 = i * 3;
+
+                    // Scatter to random positions
+                    if (Math.random() < 0.01) {
+                        targetPositions[i3] = (Math.random() - 0.5) * window.innerWidth * CONFIG.nebulaSpread;
+                        targetPositions[i3 + 1] = (Math.random() - 0.5) * window.innerHeight * CONFIG.nebulaSpread;
+                    }
+
+                    // Apply ripple effect from right hand
+                    if (state.rightIndexTip) {
+                        const dx = positions[i3] - state.rightIndexTip.x;
+                        const dy = positions[i3 + 1] - state.rightIndexTip.y;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+
+                        if (dist < 200 && dist > 0) {
+                            const ripple = Math.sin(dist * 0.05 - currentTime * 0.005) * CONFIG.rippleStrength;
+                            const nx = dx / dist;
+                            const ny = dy / dist;
+                            positions[i3] += nx * ripple * deltaTime * 60;
+                            positions[i3 + 1] += ny * ripple * deltaTime * 60;
+                        }
+                    }
+
+                    // Move towards scattered targets
+                    positions[i3] += (targetPositions[i3] - positions[i3]) * CONFIG.lerpSpeed * 0.3;
+                    positions[i3 + 1] += (targetPositions[i3 + 1] - positions[i3 + 1]) * CONFIG.lerpSpeed * 0.3;
+                    positions[i3 + 2] = 0;
+                }
+            }
+            // Normal mode: Text formation with right hand interaction
+            else {
+                for (let i = 0; i < CONFIG.particleCount; i++) {
+                    const i3 = i * 3;
+
+                    // Right hand repulsion (pointing/fist)
+                    if (state.rightIndexTip && !state.nebulaMode) {
+                        const dx = positions[i3] - state.rightIndexTip.x;
+                        const dy = positions[i3 + 1] - state.rightIndexTip.y;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+
+                        if (dist < CONFIG.repulsionRadius && dist > 0) {
+                            const force = (CONFIG.repulsionRadius - dist) / CONFIG.repulsionRadius;
+                            const strength = force * force * CONFIG.repulsionStrength;
+                            velocities[i3] += (dx / dist) * strength;
+                            velocities[i3 + 1] += (dy / dist) * strength;
+                        }
+                    }
+
+                    // Apply velocity with damping
+                    positions[i3] += velocities[i3] * deltaTime;
+                    positions[i3 + 1] += velocities[i3 + 1] * deltaTime;
+                    velocities[i3] *= 0.95;
+                    velocities[i3 + 1] *= 0.95;
+
+                    // Return to target positions
+                    positions[i3] += (targetPositions[i3] - positions[i3]) * CONFIG.lerpSpeed;
+                    positions[i3 + 1] += (targetPositions[i3 + 1] - positions[i3 + 1]) * CONFIG.lerpSpeed;
+                    positions[i3 + 2] = 0; // Keep Z at 0
+                }
+            }
+
+            geometry.attributes.position.needsUpdate = true;
+            renderer.render(scene, camera);
+        }
+
+        // ==================== RESIZE HANDLER ====================
+        function onResize() {
+            const aspect = window.innerWidth / window.innerHeight;
+            camera.left = -frustumSize * aspect / 2;
+            camera.right = frustumSize * aspect / 2;
+            camera.top = frustumSize / 2;
+            camera.bottom = -frustumSize / 2;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        window.addEventListener('resize', onResize);
+
+        // ==================== INITIALIZE ====================
+        initMediaPipe().catch(err => {
+            console.error('MediaPipe initialization failed:', err);
+            loadingEl.textContent = 'CAMERA ACCESS REQUIRED';
+        });
+
+        animate(performance.now());
+    </script>
+</body>
+
+</html>
